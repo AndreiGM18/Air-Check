@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-time Air Quality Data</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation"></script>
+    <script src="https://cdn.socket.io/4.0.1/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+        }
+        canvas {
+            width: 80%;
+            height: 400px;
+            margin: 20px auto;
+            display: block;
+        }
+        .container {
+            text-align: center;
+        }
+        #topicSelect {
+            margin-bottom: 20px;
+        }
+        .threshold-control {
+            margin: 20px;
+        }
+        .threshold-control input {
+            padding: 5px;
+            width: 80px;
+        }
+        .threshold-value {
+            margin: 10px;
+            font-size: 18px;
+        }
+        .alert-control {
+            margin: 20px;
+        }
+        .alert-control input {
+            padding: 5px;
+            width: 80px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Real-time Air Quality Data</h1>
+
+        <select id="topicSelect">
+            <option value="air_quality/reading">Source 1</option>
+            <option value="air_quality/reading2">Source 2</option>
+        </select>
+
+        <canvas id="sensorChart"></canvas>
+
+        <!-- Input for setting threshold manually -->
+        <div class="threshold-control">
+            <label for="thresholdValue">Set Threshold: </label>
+            <input type="number" id="thresholdValue" value="40" min="0">
+        </div>
+
+        <!-- Display count of points above the threshold -->
+        <div class="threshold-value">
+            Points Above Threshold: <span id="pointsAboveThreshold">0</span>
+        </div>
+
+        <!-- Input for setting alert trigger -->
+        <div class="alert-control">
+            <label for="alertTrigger">Set Alert Trigger: </label>
+            <input type="number" id="alertTrigger" value="100" min="1">
+        </div>
+    </div>
+
+    <script>
+        // Connect to the Flask SocketIO server
+        var socket = io.connect('https://' + document.domain + ':' + location.port);
+
+        var ctx = document.getElementById('sensorChart').getContext('2d');
+
+        // Initialize the chart
+        var chart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: [],  // Empty initially; will be populated with Date objects
+                datasets: [{
+                    label: 'Air Quality Index',
+                    data: [],  // Empty initially; will be populated with sensor data
+                    borderColor: 'rgba(75, 192, 192, 1)',
+                    fill: false,
+                    pointBackgroundColor: []  // To store color information for each point
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: {
+                        type: 'time',  // Use time-based x-axis
+                        position: 'bottom',
+                        title: {
+                            display: true,
+                            text: 'Timestamp'
+                        },
+                        time: {
+                            unit: 'minute',  // Customize unit to suit your data
+                            tooltipFormat: 'yyyy-MM-dd HH:mm:ss',  // Format for tooltips
+                        },
+                        ticks: {
+                            callback: function(value) {
+                                return new Date(value).toLocaleString('ro-RO');  // Format as Romanian time
+                            }
+                        }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Air Quality Index'
+                        }
+                    }
+                },
+                plugins: {
+                    annotation: {
+                        annotations: {
+                            thresholdLine: {
+                                type: 'line',
+                                yMin: 40, // Initial value of the threshold line
+                                yMax: 40,
+                                borderColor: 'red',
+                                borderWidth: 2,
+                                label: {
+                                    content: 'Threshold: 40',
+                                    enabled: true,
+                                    position: 'center'
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+
+        let thresholdExceededCount = 0; // Count of how many points exceed the threshold
+        let thresholdLine = chart.options.plugins.annotation.annotations.thresholdLine;
+        let alertTriggerValue = 100; // Default value for alert trigger
+
+        socket.on('new_data', function(data) {
+            console.log("Received data:", data);  // Debugging: check data format
+
+            var topic = data.topic;
+            if (topic === document.getElementById('topicSelect').value) {
+                // Convert the timestamps into Date objects
+                var dateLabels = data.timestamps.map(function(timestamp) {
+                    return new Date(timestamp * 1000);  // Convert Unix timestamp to JavaScript Date
+                });
+
+                // Update chart with new data, using Date objects for x-axis
+                chart.data.labels = dateLabels;  // Date objects for x-axis
+                chart.data.datasets[0].data = data.sensor_data;  // Sensor data for y-axis
+
+                // Color the points above the threshold in red
+                chart.data.datasets[0].pointBackgroundColor = data.sensor_data.map(function(value) {
+                    return value > thresholdLine.yMin ? 'red' : 'rgba(75, 192, 192, 1)';
+                });
+
+                // Count how many points exceed the threshold
+                thresholdExceededCount = data.sensor_data.filter(function(sensorValue) {
+                    return sensorValue > thresholdLine.yMin;
+                }).length;
+
+                // Update points above threshold count
+                document.getElementById('pointsAboveThreshold').textContent = thresholdExceededCount;
+
+                // Emit a signal if threshold exceeded according to the user-defined value
+                if (thresholdExceededCount >= alertTriggerValue) {
+                    console.log("Threshold exceeded " + alertTriggerValue + " times. Sending signal to turn on LED!");
+                } else {
+                    console.log("Threshold not exceeded " + alertTriggerValue + " times yet.");
+                }
+
+                chart.update();  // Re-render the chart
+            }
+        });
+
+        // Handle manual threshold value input
+        document.getElementById('thresholdValue').addEventListener('input', function(event) {
+            const newThreshold = parseInt(event.target.value, 10);
+            if (!isNaN(newThreshold)) {
+                updateThreshold(newThreshold);  // Update threshold value from input
+            }
+        });
+
+        // Handle alert trigger input
+        document.getElementById('alertTrigger').addEventListener('input', function(event) {
+            const newAlertValue = parseInt(event.target.value, 10);
+            if (!isNaN(newAlertValue) && newAlertValue >= 1) {
+                alertTriggerValue = newAlertValue;  // Update the alert trigger value
+                console.log("Alert trigger set to:", alertTriggerValue);
+            }
+        });
+
+        // Function to update the threshold line, the value display, and the input field
+        function updateThreshold(newThreshold) {
+            const yScale = chart.scales['y'];
+            if (newThreshold >= yScale.min && newThreshold <= yScale.max) {
+                thresholdLine.yMin = newThreshold;
+                thresholdLine.yMax = newThreshold;
+                document.getElementById('thresholdValue').value = newThreshold;  // Update the input field value
+                chart.update();
+                console.log("Threshold set to:", newThreshold);
+
+                // Send the threshold and alert trigger values to the backend via SocketIO
+                socket.emit('update_threshold', { threshold: newThreshold, alert_trigger: alertTriggerValue });
+            }
+        }
+    </script>
+</body>
+</html>
