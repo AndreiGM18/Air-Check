@@ -53,8 +53,8 @@ Pe server, folosește Python și aplicația MQTT pentru a primi și vizualiza da
 ### 4. **Mosquitto**
 
 Folosește mosquitto cu această configurare în fișierul mosquitto.conf:
-listener 1883
-allow_anonymous true
+  - listener 1883
+  - allow_anonymous true
 
 ## Concluzie
 
