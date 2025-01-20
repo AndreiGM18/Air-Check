@@ -48,7 +48,13 @@ Proiectul este structurat pe 3 părți principale:
 
 ### 3. **Aplicatia Server (Python)**
 
-Pe server, folosește Python și aplicația MQTT pentru a primi și vizualiza datele transmise de ESP8266. 
+Pe server, folosește Python și aplicația MQTT pentru a primi și vizualiza datele transmise de ESP8266. Fișierele template HTML se află în folderul templates/.
+
+### 4. **Mosquitto**
+
+Folosește mosquitto cu această configurare în fișierul mosquitto.conf:
+listener 1883
+allow_anonymous true
 
 ## Concluzie
 
